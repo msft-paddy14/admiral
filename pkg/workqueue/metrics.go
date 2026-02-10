@@ -36,12 +36,6 @@ type MetricsConfig struct {
 
 	// QueueLatencyOpts if specified, used to create a histogram to track time items spend in the queue.
 	QueueLatencyOpts *prometheus.HistogramOpts
-
-	// ItemsAddedOpts if specified, used to create a counter for total items added to the queue.
-	ItemsAddedOpts *prometheus.CounterOpts
-
-	// ItemsProcessedOpts if specified, used to create a counter for total items processed from the queue.
-	ItemsProcessedOpts *prometheus.CounterOpts
 }
 
 // DefaultLatencyBuckets provides default bucket boundaries for latency histograms.
@@ -54,8 +48,6 @@ var DefaultLatencyBuckets = []float64{
 type queueMetrics struct {
 	queueLength      *prometheus.GaugeVec
 	queueLatency     *prometheus.HistogramVec
-	itemsAdded       *prometheus.CounterVec
-	itemsProcessed   *prometheus.CounterVec
 	enqueueTimestamp sync.Map // map[string]time.Time
 	queueName        string
 }
@@ -87,18 +79,6 @@ func newQueueMetrics(config *MetricsConfig, queueName string) *queueMetrics {
 		prometheus.MustRegister(m.queueLatency)
 	}
 
-	if config.ItemsAddedOpts != nil {
-		opts := *config.ItemsAddedOpts
-		m.itemsAdded = prometheus.NewCounterVec(opts, labels)
-		prometheus.MustRegister(m.itemsAdded)
-	}
-
-	if config.ItemsProcessedOpts != nil {
-		opts := *config.ItemsProcessedOpts
-		m.itemsProcessed = prometheus.NewCounterVec(opts, labels)
-		prometheus.MustRegister(m.itemsProcessed)
-	}
-
 	return m
 }
 
@@ -114,23 +94,11 @@ func (m *queueMetrics) unregister() {
 	if m.queueLatency != nil {
 		prometheus.Unregister(m.queueLatency)
 	}
-
-	if m.itemsAdded != nil {
-		prometheus.Unregister(m.itemsAdded)
-	}
-
-	if m.itemsProcessed != nil {
-		prometheus.Unregister(m.itemsProcessed)
-	}
 }
 
 func (m *queueMetrics) recordAdd(key string) {
 	if m == nil {
 		return
-	}
-
-	if m.itemsAdded != nil {
-		m.itemsAdded.With(prometheus.Labels{QueueNameLabel: m.queueName}).Inc()
 	}
 
 	if m.queueLength != nil {
@@ -156,15 +124,5 @@ func (m *queueMetrics) recordGet(key string) {
 			latency := time.Since(enqueueTime.(time.Time)).Seconds()
 			m.queueLatency.With(prometheus.Labels{QueueNameLabel: m.queueName}).Observe(latency)
 		}
-	}
-}
-
-func (m *queueMetrics) recordDone() {
-	if m == nil {
-		return
-	}
-
-	if m.itemsProcessed != nil {
-		m.itemsProcessed.With(prometheus.Labels{QueueNameLabel: m.queueName}).Inc()
 	}
 }

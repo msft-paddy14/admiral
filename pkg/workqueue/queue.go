@@ -149,10 +149,7 @@ func (q *queueType) processNextWorkItem(process ProcessFunc) bool {
 
 	q.metrics.recordGet(key)
 
-	defer func() {
-		q.Done(key)
-		q.metrics.recordDone()
-	}()
+	defer q.Done(key)
 
 	ns, name, err := cache.SplitMetaNamespaceKey(key)
 	utilruntime.Must(err)

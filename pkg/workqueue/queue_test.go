@@ -27,6 +27,7 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/submariner-io/admiral/pkg/workqueue"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
@@ -363,6 +364,44 @@ var _ = Describe("Work Queue", func() {
 
 			_, ok := processed.Load(itemKey)
 			Expect(ok).To(BeTrue(), "Item was not processed")
+		})
+	})
+
+	When("metrics are configured", func() {
+		BeforeEach(func() {
+			config = &workqueue.Config{
+				MetricsConfig: &workqueue.MetricsConfig{
+					QueueLengthOpts: &prometheus.GaugeOpts{
+						Namespace: "test",
+						Name:      "queue_length",
+					},
+					QueueLatencyOpts: &prometheus.HistogramOpts{
+						Namespace: "test",
+						Name:      "queue_latency",
+					},
+				},
+			}
+		})
+
+		It("should process items without errors", func() {
+			expKeys := set.Set[string]{}
+
+			for i := 1; i <= 5; i++ {
+				k := cache.ObjectName{Namespace: "ns", Name: strconv.Itoa(i)}.String()
+				expKeys.Insert(k)
+				wq.Enqueue(cache.ExplicitKey(k))
+			}
+
+			count := expKeys.Len()
+			for i := 1; i <= count; i++ {
+				var received string
+
+				Eventually(itemCh).Should(Receive(&received))
+				Expect(expKeys.Has(received)).To(BeTrue(), "Received unexpected %q", received)
+				expKeys.Delete(received)
+			}
+
+			Expect(expKeys.Len()).To(BeZero(), "Did not receive %v", expKeys.UnsortedList())
 		})
 	})
 })
