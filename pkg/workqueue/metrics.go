@@ -39,9 +39,9 @@ type MetricsConfig struct {
 }
 
 // DefaultLatencyBuckets provides default bucket boundaries for latency histograms.
-// These buckets range from 1ms to 60s, covering typical queue latencies.
+// These buckets range from 1ms to 60000ms (60s), covering typical queue latencies.
 var DefaultLatencyBuckets = []float64{
-	0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60,
+	1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000,
 }
 
 // queueMetrics holds prometheus metrics for a workqueue.
@@ -106,7 +106,9 @@ func (m *queueMetrics) recordAdd(key string) {
 	}
 
 	if m.queueLatency != nil {
-		m.enqueueTimestamp.Store(key, time.Now())
+		// Use LoadOrStore to preserve the original timestamp if the key is re-enqueued
+		// while still in the queue (workqueue coalesces duplicate keys).
+		m.enqueueTimestamp.LoadOrStore(key, time.Now())
 	}
 }
 
@@ -121,7 +123,7 @@ func (m *queueMetrics) recordGet(key string) {
 
 	if m.queueLatency != nil {
 		if enqueueTime, ok := m.enqueueTimestamp.LoadAndDelete(key); ok {
-			latency := time.Since(enqueueTime.(time.Time)).Seconds()
+			latency := float64(time.Since(enqueueTime.(time.Time)).Milliseconds())
 			m.queueLatency.With(prometheus.Labels{QueueNameLabel: m.queueName}).Observe(latency)
 		}
 	}

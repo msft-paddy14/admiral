@@ -48,9 +48,9 @@ type latencyMetrics struct {
 }
 
 // DefaultLatencyBuckets provides default bucket boundaries for latency histograms.
-// These buckets range from 1ms to 60s, covering typical Kubernetes operation latencies.
+// These buckets range from 1ms to 60000ms (60s), covering typical Kubernetes operation latencies.
 var DefaultLatencyBuckets = []float64{
-	0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60,
+	1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000,
 }
 
 func newLatencyMetrics(config LatencyMetricsConfig, direction SyncDirection, syncerName string) *latencyMetrics {
@@ -107,7 +107,7 @@ func (m *latencyMetrics) recordTransformLatency(startTime time.Time, direction S
 		return
 	}
 
-	latency := time.Since(startTime).Seconds()
+	latency := float64(time.Since(startTime).Milliseconds())
 	m.transformLatency.With(prometheus.Labels{
 		DirectionLabel:  direction.String(),
 		OperationLabel:  op.String(),
@@ -120,7 +120,7 @@ func (m *latencyMetrics) recordFederationLatency(startTime time.Time, direction 
 		return
 	}
 
-	latency := time.Since(startTime).Seconds()
+	latency := float64(time.Since(startTime).Milliseconds())
 	m.federationLatency.With(prometheus.Labels{
 		DirectionLabel:  direction.String(),
 		OperationLabel:  op.String(),
