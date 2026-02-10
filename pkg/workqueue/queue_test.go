@@ -28,6 +28,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/submariner-io/admiral/pkg/workqueue"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/tools/cache"
@@ -383,15 +384,17 @@ var _ = Describe("Work Queue", func() {
 			}
 		})
 
-		It("should process items without errors", func() {
+		It("should track queue length and latency when processing items", func() {
 			expKeys := set.Set[string]{}
 
+			// Enqueue multiple items
 			for i := 1; i <= 5; i++ {
 				k := cache.ObjectName{Namespace: "ns", Name: strconv.Itoa(i)}.String()
 				expKeys.Insert(k)
 				wq.Enqueue(cache.ExplicitKey(k))
 			}
 
+			// Process all items
 			count := expKeys.Len()
 			for i := 1; i <= count; i++ {
 				var received string
@@ -402,6 +405,16 @@ var _ = Describe("Work Queue", func() {
 			}
 
 			Expect(expKeys.Len()).To(BeZero(), "Did not receive %v", expKeys.UnsortedList())
+
+			// Verify that the queue_length metric was recorded
+			metricCount, err := testutil.GatherAndCount(prometheus.DefaultGatherer, "test_queue_length")
+			Expect(err).To(Succeed())
+			Expect(metricCount).To(BeNumerically(">", 0), "queue_length metric should be recorded")
+
+			// Verify that the queue_latency metric was recorded
+			metricCount, err = testutil.GatherAndCount(prometheus.DefaultGatherer, "test_queue_latency")
+			Expect(err).To(Succeed())
+			Expect(metricCount).To(BeNumerically(">", 0), "queue_latency metric should be recorded")
 		})
 	})
 })
