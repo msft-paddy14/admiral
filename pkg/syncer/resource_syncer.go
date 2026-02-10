@@ -159,9 +159,17 @@ func newResourceSyncer(config *ResourceSyncerConfig) (*resourceSyncer, error) {
 		prometheus.MustRegister(syncer.syncCounter)
 	}
 
+	if syncer.config.LatencyMetricsConfig != nil {
+		syncer.latencyMetrics = newLatencyMetrics(*syncer.config.LatencyMetricsConfig, config.Direction, config.Name)
+	}
+
 	workqueueConfig := workqueue.DefaultConfigIfNil(syncer.config.WorkQueueConfig)
 	if config.MaxLogVerbosity > workqueueConfig.MaxVerbosity {
 		workqueueConfig.MaxVerbosity = config.MaxLogVerbosity
+	}
+
+	if syncer.config.WorkQueueMetricsConfig != nil {
+		workqueueConfig.MetricsConfig = syncer.config.WorkQueueMetricsConfig
 	}
 
 	syncer.workQueue = workqueue.NewWithConfig(config.Name, workqueueConfig)
@@ -225,6 +233,8 @@ func (r *resourceSyncer) Start(stopCh <-chan struct{}) error {
 			if r.config.SyncCounterOpts != nil {
 				prometheus.Unregister(r.syncCounter)
 			}
+
+			r.latencyMetrics.unregister()
 
 			if r.unregHandler != nil {
 				r.unregHandler()

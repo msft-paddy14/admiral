@@ -59,6 +59,7 @@ type queueType struct {
 	priorityQueue *PriorityQueue
 	name          string
 	logger        log.Logger
+	metrics       *queueMetrics
 }
 
 func New(name string) Interface {
@@ -86,6 +87,7 @@ func NewWithConfig(name string, config Config) Interface {
 	q := &queueType{
 		logger:        log.Logger{Logger: logf.Log.WithName("WorkQueue")},
 		priorityQueue: priorityQueue,
+		metrics:       newQueueMetrics(config.MetricsConfig, name),
 		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig(
 			// caps the maximum wait
 			workqueue.NewTypedWithMaxWaitRateLimiter(
@@ -123,6 +125,7 @@ func (q *queueType) EnqueueWithOpts(obj any, opts EnqueueOpts) {
 		q.name, key, obj, opts.Priority)
 
 	q.priorityQueue.SetPriority(key, opts.Priority)
+	q.metrics.recordAdd(key)
 
 	if opts.RateLimited {
 		q.AddRateLimited(key)
@@ -144,7 +147,12 @@ func (q *queueType) processNextWorkItem(process ProcessFunc) bool {
 		return false
 	}
 
-	defer q.Done(key)
+	q.metrics.recordGet(key)
+
+	defer func() {
+		q.Done(key)
+		q.metrics.recordDone()
+	}()
 
 	ns, name, err := cache.SplitMetaNamespaceKey(key)
 	utilruntime.Must(err)

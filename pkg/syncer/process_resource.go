@@ -111,7 +111,8 @@ func (r *resourceSyncer) handleCreatedOrUpdated(key string, created *unstructure
 
 		r.log.V(log.DEBUG).Infof("Syncer %q syncing resource %q", r.config.Name, resource.GetName())
 
-		err = r.config.Federator.Distribute(context.Background(), resource)
+		err = r.distribute(context.Background(), resource, op)
+
 		if err != nil || r.onSuccessfulSync(resource, transformed, op) {
 			namespace := resourceUtil.ExtractMissingNamespaceFromErr(err)
 			if namespace != "" {
@@ -149,7 +150,8 @@ func (r *resourceSyncer) handleDeleted(key string, deletedResource *unstructured
 
 		deleted := true
 
-		err := r.config.Federator.Delete(context.Background(), resource)
+		err := r.delete(context.Background(), resource)
+
 		if apierrors.IsNotFound(err) {
 			r.log.V(log.DEBUG).Infof("Syncer %q: resource %q not found", r.config.Name, resource.GetName())
 
