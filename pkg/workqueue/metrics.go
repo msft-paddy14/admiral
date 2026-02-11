@@ -30,12 +30,13 @@ const (
 )
 
 // MetricsConfig contains the configuration for workqueue metrics.
+// Metrics must be pre-registered by the caller and shared across queues.
 type MetricsConfig struct {
-	// QueueLengthOpts if specified, used to create a gauge to track queue length.
-	QueueLengthOpts *prometheus.GaugeOpts
+	// QueueLength tracks the current queue length.
+	QueueLength *prometheus.GaugeVec
 
-	// QueueLatencyOpts if specified, used to create a histogram to track time items spend in the queue.
-	QueueLatencyOpts *prometheus.HistogramOpts
+	// QueueLatency tracks time items spend in the queue.
+	QueueLatency *prometheus.HistogramVec
 }
 
 // DefaultLatencyBuckets provides default bucket boundaries for latency histograms.
@@ -57,42 +58,10 @@ func newQueueMetrics(config *MetricsConfig, queueName string) *queueMetrics {
 		return nil
 	}
 
-	m := &queueMetrics{
-		queueName: queueName,
-	}
-
-	labels := []string{QueueNameLabel}
-
-	if config.QueueLengthOpts != nil {
-		opts := *config.QueueLengthOpts
-		m.queueLength = prometheus.NewGaugeVec(opts, labels)
-		prometheus.MustRegister(m.queueLength)
-	}
-
-	if config.QueueLatencyOpts != nil {
-		opts := *config.QueueLatencyOpts
-		if opts.Buckets == nil {
-			opts.Buckets = DefaultLatencyBuckets
-		}
-
-		m.queueLatency = prometheus.NewHistogramVec(opts, labels)
-		prometheus.MustRegister(m.queueLatency)
-	}
-
-	return m
-}
-
-func (m *queueMetrics) unregister() {
-	if m == nil {
-		return
-	}
-
-	if m.queueLength != nil {
-		prometheus.Unregister(m.queueLength)
-	}
-
-	if m.queueLatency != nil {
-		prometheus.Unregister(m.queueLatency)
+	return &queueMetrics{
+		queueLength:  config.QueueLength,
+		queueLatency: config.QueueLatency,
+		queueName:    queueName,
 	}
 }
 

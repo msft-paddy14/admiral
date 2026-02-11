@@ -29,14 +29,13 @@ const (
 )
 
 // LatencyMetricsConfig contains the configuration for latency metrics.
+// Metrics must be pre-registered by the caller and shared across syncers.
 type LatencyMetricsConfig struct {
-	// TransformLatencyOpts if specified, used to create a histogram to record transform latency metrics.
-	// Transform latency measures the time taken to transform a resource.
-	TransformLatencyOpts *prometheus.HistogramOpts
+	// TransformLatency measures the time taken to transform a resource.
+	TransformLatency *prometheus.HistogramVec
 
-	// FederationLatencyOpts if specified, used to create a histogram to record federation latency metrics.
-	// Federation latency measures the time taken to distribute or delete a resource via the federator.
-	FederationLatencyOpts *prometheus.HistogramOpts
+	// FederationLatency measures the time taken to distribute or delete a resource via the federator.
+	FederationLatency *prometheus.HistogramVec
 }
 
 // latencyMetrics holds the prometheus metrics for measuring latencies.
@@ -54,51 +53,11 @@ var DefaultLatencyBuckets = []float64{
 }
 
 func newLatencyMetrics(config LatencyMetricsConfig, direction SyncDirection, syncerName string) *latencyMetrics {
-	m := &latencyMetrics{
-		direction:  direction,
-		syncerName: syncerName,
-	}
-
-	labels := []string{
-		DirectionLabel,
-		OperationLabel,
-		SyncerNameLabel,
-	}
-
-	if config.TransformLatencyOpts != nil {
-		opts := *config.TransformLatencyOpts
-		if opts.Buckets == nil {
-			opts.Buckets = DefaultLatencyBuckets
-		}
-
-		m.transformLatency = prometheus.NewHistogramVec(opts, labels)
-		prometheus.MustRegister(m.transformLatency)
-	}
-
-	if config.FederationLatencyOpts != nil {
-		opts := *config.FederationLatencyOpts
-		if opts.Buckets == nil {
-			opts.Buckets = DefaultLatencyBuckets
-		}
-
-		m.federationLatency = prometheus.NewHistogramVec(opts, labels)
-		prometheus.MustRegister(m.federationLatency)
-	}
-
-	return m
-}
-
-func (m *latencyMetrics) unregister() {
-	if m == nil {
-		return
-	}
-
-	if m.transformLatency != nil {
-		prometheus.Unregister(m.transformLatency)
-	}
-
-	if m.federationLatency != nil {
-		prometheus.Unregister(m.federationLatency)
+	return &latencyMetrics{
+		transformLatency:  config.TransformLatency,
+		federationLatency: config.FederationLatency,
+		direction:         direction,
+		syncerName:        syncerName,
 	}
 }
 

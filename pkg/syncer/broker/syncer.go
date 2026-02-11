@@ -103,6 +103,18 @@ type ResourceConfig struct {
 
 	// SyncCounterOpts used to pass name and help text to resource syncer Gauge
 	SyncCounterOpts *prometheus.GaugeOpts
+
+	// TransformLatencyOpts if specified, used to create a histogram to record transform latency metrics.
+	TransformLatencyOpts *prometheus.HistogramOpts
+
+	// FederationLatencyOpts if specified, used to create a histogram to record federation latency metrics.
+	FederationLatencyOpts *prometheus.HistogramOpts
+
+	// QueueLengthOpts if specified, used to create a gauge to track work queue length.
+	QueueLengthOpts *prometheus.GaugeOpts
+
+	// QueueLatencyOpts if specified, used to create a histogram to track time items spend in the work queue.
+	QueueLatencyOpts *prometheus.HistogramOpts
 }
 
 type SyncerConfig struct {
@@ -159,6 +171,102 @@ type Syncer struct {
 
 var logger = log.Logger{Logger: logf.Log.WithName("BrokerSyncer")}
 
+// resourceMetrics holds the registered metrics for a resource configuration.
+type resourceMetrics struct {
+	syncCounter          *prometheus.GaugeVec
+	latencyMetricsConfig *syncer.LatencyMetricsConfig
+	workQueueMetrics     *workqueue.MetricsConfig
+}
+
+// registerMetrics creates and registers all prometheus metrics for a resource configuration.
+func registerMetrics(rc *ResourceConfig) *resourceMetrics {
+	m := &resourceMetrics{}
+
+	if rc.SyncCounterOpts != nil {
+		m.syncCounter = prometheus.NewGaugeVec(
+			*rc.SyncCounterOpts,
+			[]string{
+				syncer.DirectionLabel,
+				syncer.OperationLabel,
+				syncer.SyncerNameLabel,
+			},
+		)
+		prometheus.MustRegister(m.syncCounter)
+	}
+
+	if rc.TransformLatencyOpts != nil || rc.FederationLatencyOpts != nil {
+		m.latencyMetricsConfig = &syncer.LatencyMetricsConfig{}
+
+		if rc.TransformLatencyOpts != nil {
+			opts := *rc.TransformLatencyOpts
+			if opts.Buckets == nil {
+				opts.Buckets = syncer.DefaultLatencyBuckets
+			}
+
+			m.latencyMetricsConfig.TransformLatency = prometheus.NewHistogramVec(opts, []string{
+				syncer.DirectionLabel,
+				syncer.OperationLabel,
+				syncer.SyncerNameLabel,
+			})
+			prometheus.MustRegister(m.latencyMetricsConfig.TransformLatency)
+		}
+
+		if rc.FederationLatencyOpts != nil {
+			opts := *rc.FederationLatencyOpts
+			if opts.Buckets == nil {
+				opts.Buckets = syncer.DefaultLatencyBuckets
+			}
+
+			m.latencyMetricsConfig.FederationLatency = prometheus.NewHistogramVec(opts, []string{
+				syncer.DirectionLabel,
+				syncer.OperationLabel,
+				syncer.SyncerNameLabel,
+			})
+			prometheus.MustRegister(m.latencyMetricsConfig.FederationLatency)
+		}
+	}
+
+	if rc.QueueLengthOpts != nil || rc.QueueLatencyOpts != nil {
+		m.workQueueMetrics = &workqueue.MetricsConfig{}
+
+		if rc.QueueLengthOpts != nil {
+			m.workQueueMetrics.QueueLength = prometheus.NewGaugeVec(
+				*rc.QueueLengthOpts,
+				[]string{workqueue.QueueNameLabel},
+			)
+			prometheus.MustRegister(m.workQueueMetrics.QueueLength)
+		}
+
+		if rc.QueueLatencyOpts != nil {
+			opts := *rc.QueueLatencyOpts
+			if opts.Buckets == nil {
+				opts.Buckets = workqueue.DefaultLatencyBuckets
+			}
+
+			m.workQueueMetrics.QueueLatency = prometheus.NewHistogramVec(opts, []string{workqueue.QueueNameLabel})
+			prometheus.MustRegister(m.workQueueMetrics.QueueLatency)
+		}
+	}
+
+	return m
+}
+
+// getWorkQueueConfig returns a WorkQueueConfig with metrics applied if configured.
+func (m *resourceMetrics) getWorkQueueConfig(base *workqueue.Config) *workqueue.Config {
+	if m.workQueueMetrics == nil {
+		return base
+	}
+
+	config := base
+	if config == nil {
+		config = &workqueue.Config{}
+	}
+
+	config.MetricsConfig = m.workQueueMetrics
+
+	return config
+}
+
 // NewSyncer creates a Syncer that performs bi-directional syncing of resources between a local source and a central broker.
 func NewSyncer(config SyncerConfig) (*Syncer, error) { //nolint:gocritic // Minimal performance hit, we modify our copy
 	if len(config.ResourceConfigs) == 0 {
@@ -205,39 +313,29 @@ func NewSyncer(config SyncerConfig) (*Syncer, error) { //nolint:gocritic // Mini
 
 	for i := range config.ResourceConfigs {
 		rc := &config.ResourceConfigs[i]
-		var syncCounter *prometheus.GaugeVec
-		if rc.SyncCounterOpts != nil {
-			syncCounter = prometheus.NewGaugeVec(
-				*rc.SyncCounterOpts,
-				[]string{
-					syncer.DirectionLabel,
-					syncer.OperationLabel,
-					syncer.SyncerNameLabel,
-				},
-			)
-			prometheus.MustRegister(syncCounter)
-		}
+		metrics := registerMetrics(rc)
 
 		localSyncer, err := syncer.NewResourceSyncer(&syncer.ResourceSyncerConfig{
-			Name:                fmt.Sprintf("local -> broker for %T", rc.LocalResourceType),
-			SourceClient:        config.LocalClient,
-			SourceNamespace:     rc.LocalSourceNamespace,
-			SourceLabelSelector: rc.LocalSourceLabelSelector,
-			SourceFieldSelector: rc.LocalSourceFieldSelector,
-			LocalClusterID:      config.LocalClusterID,
-			Direction:           syncer.LocalToRemote,
-			RestMapper:          config.RestMapper,
-			Federator:           brokerSyncer.remoteFederator,
-			ResourceType:        rc.LocalResourceType,
-			Transform:           rc.TransformLocalToBroker,
-			OnSuccessfulSync:    rc.OnSuccessfulSyncToBroker,
-			ResourcesEquivalent: rc.LocalResourcesEquivalent,
-			ShouldProcess:       rc.LocalShouldProcess,
-			WaitForCacheSync:    rc.LocalWaitForCacheSync,
-			WorkQueueConfig:     rc.LocalWorkQueueConfig,
-			Scheme:              config.Scheme,
-			ResyncPeriod:        rc.LocalResyncPeriod,
-			SyncCounter:         syncCounter,
+			Name:                 fmt.Sprintf("local -> broker for %T", rc.LocalResourceType),
+			SourceClient:         config.LocalClient,
+			SourceNamespace:      rc.LocalSourceNamespace,
+			SourceLabelSelector:  rc.LocalSourceLabelSelector,
+			SourceFieldSelector:  rc.LocalSourceFieldSelector,
+			LocalClusterID:       config.LocalClusterID,
+			Direction:            syncer.LocalToRemote,
+			RestMapper:           config.RestMapper,
+			Federator:            brokerSyncer.remoteFederator,
+			ResourceType:         rc.LocalResourceType,
+			Transform:            rc.TransformLocalToBroker,
+			OnSuccessfulSync:     rc.OnSuccessfulSyncToBroker,
+			ResourcesEquivalent:  rc.LocalResourcesEquivalent,
+			ShouldProcess:        rc.LocalShouldProcess,
+			WaitForCacheSync:     rc.LocalWaitForCacheSync,
+			WorkQueueConfig:      metrics.getWorkQueueConfig(rc.LocalWorkQueueConfig),
+			Scheme:               config.Scheme,
+			ResyncPeriod:         rc.LocalResyncPeriod,
+			SyncCounter:          metrics.syncCounter,
+			LatencyMetricsConfig: metrics.latencyMetricsConfig,
 		})
 		if err != nil {
 			return nil, errors.Wrap(err, "error creating local resource syncer")
@@ -249,25 +347,26 @@ func NewSyncer(config SyncerConfig) (*Syncer, error) { //nolint:gocritic // Mini
 		waitForCacheSync := ptr.Deref(rc.BrokerWaitForCacheSync, false)
 
 		remoteSyncer, err := syncer.NewResourceSyncer(&syncer.ResourceSyncerConfig{
-			Name:                fmt.Sprintf("broker -> local for %T", rc.BrokerResourceType),
-			SourceClient:        config.BrokerClient,
-			SourceNamespace:     config.BrokerNamespace,
-			SourceLabelSelector: rc.LocalSourceLabelSelector,
-			SourceFieldSelector: rc.LocalSourceFieldSelector,
-			LocalClusterID:      config.LocalClusterID,
-			Direction:           syncer.RemoteToLocal,
-			RestMapper:          config.RestMapper,
-			Federator:           brokerSyncer.localFederator,
-			ResourceType:        rc.BrokerResourceType,
-			Transform:           rc.TransformBrokerToLocal,
-			OnSuccessfulSync:    rc.OnSuccessfulSyncFromBroker,
-			ResourcesEquivalent: rc.BrokerResourcesEquivalent,
-			WaitForCacheSync:    &waitForCacheSync,
-			WorkQueueConfig:     rc.BrokerWorkQueueConfig,
-			Scheme:              config.Scheme,
-			ResyncPeriod:        rc.BrokerResyncPeriod,
-			SyncCounter:         syncCounter,
-			NamespaceInformer:   config.NamespaceInformer,
+			Name:                 fmt.Sprintf("broker -> local for %T", rc.BrokerResourceType),
+			SourceClient:         config.BrokerClient,
+			SourceNamespace:      config.BrokerNamespace,
+			SourceLabelSelector:  rc.LocalSourceLabelSelector,
+			SourceFieldSelector:  rc.LocalSourceFieldSelector,
+			LocalClusterID:       config.LocalClusterID,
+			Direction:            syncer.RemoteToLocal,
+			RestMapper:           config.RestMapper,
+			Federator:            brokerSyncer.localFederator,
+			ResourceType:         rc.BrokerResourceType,
+			Transform:            rc.TransformBrokerToLocal,
+			OnSuccessfulSync:     rc.OnSuccessfulSyncFromBroker,
+			ResourcesEquivalent:  rc.BrokerResourcesEquivalent,
+			WaitForCacheSync:     &waitForCacheSync,
+			WorkQueueConfig:      metrics.getWorkQueueConfig(rc.BrokerWorkQueueConfig),
+			Scheme:               config.Scheme,
+			ResyncPeriod:         rc.BrokerResyncPeriod,
+			SyncCounter:          metrics.syncCounter,
+			LatencyMetricsConfig: metrics.latencyMetricsConfig,
+			NamespaceInformer:    config.NamespaceInformer,
 		})
 		if err != nil {
 			return nil, errors.Wrap(err, "error creating remote resource syncer")

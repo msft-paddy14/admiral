@@ -190,10 +190,6 @@ type ResourceSyncerConfig struct {
 	// LatencyMetricsConfig if specified, configures latency metrics for transform time and federation time.
 	LatencyMetricsConfig *LatencyMetricsConfig
 
-	// WorkQueueMetricsConfig if specified, configures metrics for the underlying work queue
-	// (queue length, queue latency, items added/processed).
-	WorkQueueMetricsConfig *workqueue.MetricsConfig
-
 	// NamespaceInformer if specified, used to retry resources that initially failed due to missing namespace.
 	NamespaceInformer cache.SharedInformer
 
@@ -332,12 +328,7 @@ func newResourceSyncer(config *ResourceSyncerConfig) (*resourceSyncer, error) {
 		syncer.latencyMetrics = newLatencyMetrics(*syncer.config.LatencyMetricsConfig, config.Direction, config.Name)
 	}
 
-	workqueueConfig := workqueue.DefaultConfigIfNil(syncer.config.WorkQueueConfig)
-	if syncer.config.WorkQueueMetricsConfig != nil {
-		workqueueConfig.MetricsConfig = syncer.config.WorkQueueMetricsConfig
-	}
-
-	syncer.workQueue = workqueue.NewWithConfig(config.Name, workqueueConfig)
+	syncer.workQueue = workqueue.NewWithConfig(config.Name, workqueue.DefaultConfigIfNil(syncer.config.WorkQueueConfig))
 
 	if config.NamespaceInformer != nil {
 		reg, err := config.NamespaceInformer.AddEventHandler(cache.ResourceEventHandlerDetailedFuncs{
@@ -398,8 +389,6 @@ func (r *resourceSyncer) Start(stopCh <-chan struct{}) error {
 			if r.config.SyncCounterOpts != nil {
 				prometheus.Unregister(r.syncCounter)
 			}
-
-			r.latencyMetrics.unregister()
 
 			if r.unregHandler != nil {
 				r.unregHandler()
