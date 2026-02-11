@@ -44,6 +44,8 @@ type Config struct {
 	BucketRateLimiterItemsPerSec int
 	BucketRateLimiterMaxBurst    int
 	MaxVerbosity                 int
+	// MetricsConfig if specified, enables queue metrics collection.
+	MetricsConfig *MetricsConfig
 }
 
 func DefaultConfig() Config {

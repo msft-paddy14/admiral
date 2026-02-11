@@ -187,6 +187,13 @@ type ResourceSyncerConfig struct {
 	// SyncCounter if specified, used to record counter metrics.
 	SyncCounter *prometheus.GaugeVec
 
+	// LatencyMetricsConfig if specified, configures latency metrics for transform time and federation time.
+	LatencyMetricsConfig *LatencyMetricsConfig
+
+	// WorkQueueMetricsConfig if specified, configures metrics for the underlying work queue
+	// (queue length, queue latency, items added/processed).
+	WorkQueueMetricsConfig *workqueue.MetricsConfig
+
 	// NamespaceInformer if specified, used to retry resources that initially failed due to missing namespace.
 	NamespaceInformer cache.SharedInformer
 
@@ -206,6 +213,7 @@ type resourceSyncer struct {
 	operationQueues   *operationQueueMap
 	stopped           chan struct{}
 	syncCounter       *prometheus.GaugeVec
+	latencyMetrics    *latencyMetrics
 	stopCh            <-chan struct{}
 	log               log.Logger
 	missingNamespaces map[string]set.Set[string]
@@ -320,7 +328,16 @@ func newResourceSyncer(config *ResourceSyncerConfig) (*resourceSyncer, error) {
 		prometheus.MustRegister(syncer.syncCounter)
 	}
 
-	syncer.workQueue = workqueue.NewWithConfig(config.Name, workqueue.DefaultConfigIfNil(syncer.config.WorkQueueConfig))
+	if syncer.config.LatencyMetricsConfig != nil {
+		syncer.latencyMetrics = newLatencyMetrics(*syncer.config.LatencyMetricsConfig, config.Direction, config.Name)
+	}
+
+	workqueueConfig := workqueue.DefaultConfigIfNil(syncer.config.WorkQueueConfig)
+	if syncer.config.WorkQueueMetricsConfig != nil {
+		workqueueConfig.MetricsConfig = syncer.config.WorkQueueMetricsConfig
+	}
+
+	syncer.workQueue = workqueue.NewWithConfig(config.Name, workqueueConfig)
 
 	if config.NamespaceInformer != nil {
 		reg, err := config.NamespaceInformer.AddEventHandler(cache.ResourceEventHandlerDetailedFuncs{
@@ -381,6 +398,8 @@ func (r *resourceSyncer) Start(stopCh <-chan struct{}) error {
 			if r.config.SyncCounterOpts != nil {
 				prometheus.Unregister(r.syncCounter)
 			}
+
+			r.latencyMetrics.unregister()
 
 			if r.unregHandler != nil {
 				r.unregHandler()
@@ -641,7 +660,10 @@ func (r *resourceSyncer) handleCreatedOrUpdated(key string, created *unstructure
 		return false, nil
 	}
 
+	transformStart := time.Now()
 	resource, transformed, requeue := r.transform(resource, key, op)
+	r.latencyMetrics.recordTransformLatency(transformStart, r.config.Direction, op, r.config.Name)
+
 	if resource != nil {
 		if r.config.SourceNamespace == metav1.NamespaceAll && resource.GetNamespace() != "" {
 			resource = resource.DeepCopy()
@@ -651,7 +673,10 @@ func (r *resourceSyncer) handleCreatedOrUpdated(key string, created *unstructure
 
 		r.log.V(log.LIBDEBUG).Infof("Syncer %q syncing resource %q", r.config.Name, resource.GetName())
 
+		federateStart := time.Now()
 		err = r.config.Federator.Distribute(context.Background(), resource)
+		r.latencyMetrics.recordFederationLatency(federateStart, r.config.Direction, op, r.config.Name)
+
 		if err != nil || r.onSuccessfulSync(resource, transformed, op) {
 			namespace := resourceUtil.ExtractMissingNamespaceFromErr(err)
 			if namespace != "" {
@@ -685,13 +710,19 @@ func (r *resourceSyncer) handleDeleted(key string, deletedResource *unstructured
 		return false, nil
 	}
 
+	transformStart := time.Now()
 	resource, transformed, requeue := r.transform(deletedResource, key, Delete)
+	r.latencyMetrics.recordTransformLatency(transformStart, r.config.Direction, Delete, r.config.Name)
+
 	if resource != nil {
 		r.log.V(log.LIBDEBUG).Infof("Syncer %q deleting resource %q: %#v", r.config.Name, resource.GetName(), resource)
 
 		deleted := true
 
+		federateStart := time.Now()
 		err := r.config.Federator.Delete(context.Background(), resource)
+		r.latencyMetrics.recordFederationLatency(federateStart, r.config.Direction, Delete, r.config.Name)
+
 		if apierrors.IsNotFound(err) {
 			r.log.V(log.LIBDEBUG).Infof("Syncer %q: resource %q not found", r.config.Name, resource.GetName())
 
