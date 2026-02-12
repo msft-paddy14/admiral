@@ -152,6 +152,12 @@ type SyncerConfig struct {
 	// specified, the namespace is obtained from an environment variable.
 	BrokerNamespace string
 
+	// BrokerQPS is the QPS to use for the broker REST config. If 0, uses the default.
+	BrokerQPS float32
+
+	// BrokerBurst is the burst to use for the broker REST config. If 0, uses the default.
+	BrokerBurst int
+
 	// ResourceConfigs the configurations for resources to sync
 	ResourceConfigs []ResourceConfig
 
@@ -432,6 +438,17 @@ func createBrokerClient(config *SyncerConfig) error {
 
 	if err != nil {
 		logger.Error(err, "Error accessing the broker API server")
+	}
+
+	// Apply QPS and Burst settings to the broker REST config if specified
+	if config.BrokerRestConfig != nil {
+		if config.BrokerQPS > 0 {
+			config.BrokerRestConfig.QPS = config.BrokerQPS
+		}
+
+		if config.BrokerBurst > 0 {
+			config.BrokerRestConfig.Burst = config.BrokerBurst
+		}
 	}
 
 	config.BrokerClient, err = resource.NewDynamicClient(config.BrokerRestConfig)
