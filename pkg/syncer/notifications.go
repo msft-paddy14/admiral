@@ -19,7 +19,9 @@ limitations under the License.
 package syncer
 
 import (
+	"context"
 	"reflect"
+	"time"
 
 	"github.com/submariner-io/admiral/pkg/federate"
 	"github.com/submariner-io/admiral/pkg/log"
@@ -66,6 +68,7 @@ func (r *resourceSyncer) onUpdate(oldObj, newObj any) {
 
 		return
 	}
+
 
 	// If the resource version didn't change, that indicates a re-sync by the informer so enqueue at low priority.
 	// We want to prioritize processing resources that did actually change.
@@ -116,6 +119,11 @@ func (r *resourceSyncer) transform(from *unstructured.Unstructured, key string,
 		return from, nil, false
 	}
 
+	start := time.Now()
+	defer func() {
+		r.latencyMetrics.recordTransformLatency(start, r.config.Direction, op, r.config.Name)
+	}()
+
 	clusterID, _ := getClusterIDLabel(from)
 
 	converted := r.mustConvert(from)
@@ -138,4 +146,22 @@ func (r *resourceSyncer) transform(from *unstructured.Unstructured, key string,
 
 func (r *resourceSyncer) shouldProcess(resource *unstructured.Unstructured, op Operation) bool {
 	return r.config.ShouldProcess == nil || r.config.ShouldProcess(resource, op)
+}
+
+func (r *resourceSyncer) distribute(ctx context.Context, resource runtime.Object, op Operation) error {
+	start := time.Now()
+	defer func() {
+		r.latencyMetrics.recordFederationLatency(start, r.config.Direction, op, r.config.Name)
+	}()
+
+	return r.config.Federator.Distribute(ctx, resource)
+}
+
+func (r *resourceSyncer) delete(ctx context.Context, resource runtime.Object) error {
+	start := time.Now()
+	defer func() {
+		r.latencyMetrics.recordFederationLatency(start, r.config.Direction, Delete, r.config.Name)
+	}()
+
+	return r.config.Federator.Delete(ctx, resource)
 }

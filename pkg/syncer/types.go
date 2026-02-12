@@ -171,6 +171,13 @@ type ResourceSyncerConfig struct {
 	// SyncCounter if specified, used to record counter metrics.
 	SyncCounter *prometheus.GaugeVec
 
+	// LatencyMetricsConfig if specified, configures latency metrics for transform time and federation time.
+	LatencyMetricsConfig *LatencyMetricsConfig
+
+	// WorkQueueMetricsConfig if specified, configures metrics for the underlying work queue
+	// (queue length, queue latency, items added/processed).
+	WorkQueueMetricsConfig *workqueue.MetricsConfig
+
 	// NamespaceInformer if specified, used to retry resources that initially failed due to missing namespace.
 	NamespaceInformer cache.SharedInformer
 
@@ -195,6 +202,7 @@ type resourceSyncer struct {
 	operationQueues   *operationQueueMap
 	stopped           chan struct{}
 	syncCounter       *prometheus.GaugeVec
+	latencyMetrics    *latencyMetrics
 	stopCh            <-chan struct{}
 	log               log.Logger
 	missingNamespaces map[string]set.Set[string]
