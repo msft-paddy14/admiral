@@ -19,6 +19,7 @@ limitations under the License.
 package workqueue
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,8 @@ import (
 
 const (
 	QueueNameLabel = "queue_name"
+	NamespaceLabel = "namespace"
+	NameLabel      = "name"
 )
 
 // MetricsConfig contains the configuration for workqueue metrics.
@@ -37,6 +40,9 @@ type MetricsConfig struct {
 
 	// QueueLatency tracks time items spend in the queue.
 	QueueLatency *prometheus.HistogramVec
+
+	// RequeueCount tracks the total number of times items have been requeued for retry.
+	RequeueCount *prometheus.CounterVec
 }
 
 // DefaultLatencyBuckets provides default bucket boundaries for latency histograms.
@@ -49,8 +55,10 @@ var DefaultLatencyBuckets = []float64{
 type queueMetrics struct {
 	queueLength      *prometheus.GaugeVec
 	queueLatency     *prometheus.HistogramVec
+	requeueCount     *prometheus.CounterVec
 	enqueueTimestamp sync.Map // map[string]time.Time
 	queueName        string
+	getLenFunc       func() int // function to get actual queue length
 }
 
 func newQueueMetrics(config *MetricsConfig, queueName string) *queueMetrics {
@@ -61,7 +69,14 @@ func newQueueMetrics(config *MetricsConfig, queueName string) *queueMetrics {
 	return &queueMetrics{
 		queueLength:  config.QueueLength,
 		queueLatency: config.QueueLatency,
+		requeueCount: config.RequeueCount,
 		queueName:    queueName,
+	}
+}
+
+func (m *queueMetrics) setLenFunc(f func() int) {
+	if m != nil {
+		m.getLenFunc = f
 	}
 }
 
@@ -70,8 +85,9 @@ func (m *queueMetrics) recordAdd(key string) {
 		return
 	}
 
-	if m.queueLength != nil {
-		m.queueLength.With(prometheus.Labels{QueueNameLabel: m.queueName}).Inc()
+	// Update gauge to actual queue length if available
+	if m.queueLength != nil && m.getLenFunc != nil {
+		m.queueLength.With(prometheus.Labels{QueueNameLabel: m.queueName}).Set(float64(m.getLenFunc()))
 	}
 
 	if m.queueLatency != nil {
@@ -86,8 +102,9 @@ func (m *queueMetrics) recordGet(key string) {
 		return
 	}
 
-	if m.queueLength != nil {
-		m.queueLength.With(prometheus.Labels{QueueNameLabel: m.queueName}).Dec()
+	// Update gauge to actual queue length if available
+	if m.queueLength != nil && m.getLenFunc != nil {
+		m.queueLength.With(prometheus.Labels{QueueNameLabel: m.queueName}).Set(float64(m.getLenFunc()))
 	}
 
 	if m.queueLatency != nil {
@@ -96,4 +113,29 @@ func (m *queueMetrics) recordGet(key string) {
 			m.queueLatency.With(prometheus.Labels{QueueNameLabel: m.queueName}).Observe(latency)
 		}
 	}
+}
+
+func (m *queueMetrics) recordRequeue(key string) {
+	if m == nil {
+		return
+	}
+
+	if m.requeueCount != nil {
+		ns, name := parseKey(key)
+		m.requeueCount.With(prometheus.Labels{
+			QueueNameLabel: m.queueName,
+			NamespaceLabel: ns,
+			NameLabel:      name,
+		}).Inc()
+	}
+}
+
+// parseKey parses a workqueue key in the format "namespace/name" or just "name".
+func parseKey(key string) (namespace, name string) {
+	parts := strings.SplitN(key, "/", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+
+	return "", key
 }

@@ -115,6 +115,9 @@ type ResourceConfig struct {
 
 	// QueueLatencyOpts if specified, used to create a histogram to track time items spend in the work queue.
 	QueueLatencyOpts *prometheus.HistogramOpts
+
+	// RequeueCountOpts if specified, used to create a counter to track the number of requeue/retry operations.
+	RequeueCountOpts *prometheus.CounterOpts
 }
 
 type SyncerConfig struct {
@@ -226,7 +229,7 @@ func registerMetrics(rc *ResourceConfig) *resourceMetrics {
 		}
 	}
 
-	if rc.QueueLengthOpts != nil || rc.QueueLatencyOpts != nil {
+	if rc.QueueLengthOpts != nil || rc.QueueLatencyOpts != nil || rc.RequeueCountOpts != nil {
 		m.workQueueMetrics = &workqueue.MetricsConfig{}
 
 		if rc.QueueLengthOpts != nil {
@@ -245,6 +248,14 @@ func registerMetrics(rc *ResourceConfig) *resourceMetrics {
 
 			m.workQueueMetrics.QueueLatency = prometheus.NewHistogramVec(opts, []string{workqueue.QueueNameLabel})
 			prometheus.MustRegister(m.workQueueMetrics.QueueLatency)
+		}
+
+		if rc.RequeueCountOpts != nil {
+			m.workQueueMetrics.RequeueCount = prometheus.NewCounterVec(
+				*rc.RequeueCountOpts,
+				[]string{workqueue.QueueNameLabel, workqueue.NamespaceLabel, workqueue.NameLabel},
+			)
+			prometheus.MustRegister(m.workQueueMetrics.RequeueCount)
 		}
 	}
 

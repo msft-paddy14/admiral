@@ -99,6 +99,9 @@ func NewWithConfig(name string, config Config) Interface {
 		name: name,
 	}
 
+	// Set the length function for accurate queue length metrics
+	q.metrics.setLenFunc(q.Len)
+
 	q.logger.SetMaxVerbosity(config.MaxVerbosity)
 	q.priorityQueue.logger.SetMaxVerbosity(config.MaxVerbosity)
 
@@ -118,7 +121,6 @@ func (q *queueType) EnqueueWithOpts(obj interface{}, opts EnqueueOpts) {
 
 	q.priorityQueue.SetPriority(key, opts.Priority)
 	q.metrics.recordAdd(key)
-
 	if opts.RateLimited {
 		q.AddRateLimited(key)
 	} else {
@@ -153,6 +155,8 @@ func (q *queueType) processNextWorkItem(process ProcessFunc) bool {
 
 	if requeue {
 		q.AddRateLimited(key)
+		q.metrics.recordAdd(key)    // Update gauge after adding to queue
+		q.metrics.recordRequeue(key) // Increment requeue counter
 		q.logger.V(log.DEBUG).Infof("%s: enqueued %q for retry - # of times re-queued: %d, queue size: %d",
 			q.name, key, q.NumRequeues(key), q.Len())
 	} else {
