@@ -134,10 +134,10 @@ func (q *queueType) EnqueueWithOpts(obj any, opts EnqueueOpts) {
 func (q *queueType) Run(process ProcessFunc ) {
 
 
-
+		go func() {
 			for q.processNextWorkItem(process) {
 			}
-
+		}()
 	
 }
 
