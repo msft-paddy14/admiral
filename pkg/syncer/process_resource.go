@@ -20,6 +20,7 @@ package syncer
 
 import (
 	"context"
+	"time"
 
 	"github.com/pkg/errors"
 	"github.com/submariner-io/admiral/pkg/log"
@@ -84,10 +85,14 @@ func (r *resourceSyncer) handleCreatedOrUpdated(key string, created *unstructure
 		op = Create
 	}
 
+	tGetStart := time.Now()
+
 	obj, exists, err := r.store.GetByKey(key)
 	if err != nil {
 		return true, errors.Wrapf(err, "error retrieving resource %q", key)
 	}
+
+	tGetDone := time.Since(tGetStart)
 
 	// Use the latest resource from the cache regardless of the operation. If it doesn't exist, for a create operation, this means
 	// a deletion occurred afterward, in which case we'll process the 'created' resource.
@@ -104,7 +109,12 @@ func (r *resourceSyncer) handleCreatedOrUpdated(key string, created *unstructure
 		return false, nil
 	}
 
+	tTransformStart := time.Now()
+
 	resource, transformed, requeue := r.transform(resource, key, op)
+
+	tTransformDone := time.Since(tTransformStart)
+
 	if resource != nil {
 		if r.config.SourceNamespace == metav1.NamespaceAll && resource.GetNamespace() != "" {
 			resource = resource.DeepCopy()
@@ -114,7 +124,15 @@ func (r *resourceSyncer) handleCreatedOrUpdated(key string, created *unstructure
 
 		r.log.V(log.DEBUG).Infof("Syncer %q syncing resource %q", r.config.Name, resource.GetName())
 
+		tDistributeStart := time.Now()
+
 		err = r.config.Federator.Distribute(context.Background(), resource)
+
+		tDistributeDone := time.Since(tDistributeStart)
+
+		r.log.Infof("[TIMING] Syncer %q %s %q: cacheGet=%v transform=%v distribute=%v",
+			r.config.Name, op, key, tGetDone, tTransformDone, tDistributeDone)
+
 		if err != nil || r.onSuccessfulSync(resource, transformed, op) {
 			namespace := resourceUtil.ExtractMissingNamespaceFromErr(err)
 			if namespace != "" {
@@ -146,19 +164,32 @@ func (r *resourceSyncer) handleDeleted(key string, deletedResource *unstructured
 		return false, nil
 	}
 
+	tTransformStart := time.Now()
+
 	resource, transformed, requeue := r.transform(deletedResource, key, Delete)
+
+	tTransformDone := time.Since(tTransformStart)
+
 	if resource != nil {
 		r.log.V(log.DEBUG).Infof("Syncer %q deleting resource %q", r.config.Name, resource.GetName())
 
 		deleted := true
 
+		tDeleteStart := time.Now()
+
 		err := r.config.Federator.Delete(context.Background(), resource)
+
+		tDeleteDone := time.Since(tDeleteStart)
+
 		if apierrors.IsNotFound(err) {
 			r.log.V(log.DEBUG).Infof("Syncer %q: resource %q not found", r.config.Name, resource.GetName())
 
 			deleted = false
 			err = nil
 		}
+
+		r.log.Infof("[TIMING] Syncer %q Delete %q: transform=%v federateDelete=%v",
+			r.config.Name, key, tTransformDone, tDeleteDone)
 
 		if err != nil || r.onSuccessfulSync(resource, transformed, Delete) {
 			return true, errors.Wrapf(err, "error deleting resource %q", key)

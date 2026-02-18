@@ -22,6 +22,7 @@ package workqueue
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/pkg/errors"
@@ -88,7 +89,10 @@ func NewWithConfig(name string, config Config) Interface {
 	if numWorkers < 1 {
 		numWorkers = 1
 	}
-	logf.Log.Info("%s: using %d worker(s)", name, numWorkers)	
+
+	fmt.Fprintf(os.Stderr, "[WorkQueue] %s: config numWorkers=%d bucketRateItemsPerSec=%d bucketRateMaxBurst=%d maxVerbosity=%d\n",
+		name, numWorkers, config.BucketRateLimiterItemsPerSec, config.BucketRateLimiterMaxBurst, config.MaxVerbosity)
+
 	q := &queueType{
 		logger:        log.Logger{Logger: logf.Log.WithName("WorkQueue")},
 		priorityQueue: priorityQueue,
@@ -142,14 +146,17 @@ func (q *queueType) Run(process ProcessFunc) {
 	q.logger.Infof("%s: starting %d worker(s)", q.name, q.numWorkers)
 
 	for i := 0; i < q.numWorkers; i++ {
+		workerID := i
+		q.logger.Infof("%s: launched worker %d", q.name, workerID)
+
 		go func() {
-			for q.processNextWorkItem(process) {
+			for q.processNextWorkItem(process, workerID) {
 			}
 		}()
 	}
 }
 
-func (q *queueType) processNextWorkItem(process ProcessFunc) bool {
+func (q *queueType) processNextWorkItem(process ProcessFunc, workerID int) bool {
 	key, shutdown := q.Get()
 	if shutdown {
 		return false
@@ -157,13 +164,25 @@ func (q *queueType) processNextWorkItem(process ProcessFunc) bool {
 
 	defer q.Done(key)
 
+	queueDepth := q.Len()
+	start := time.Now()
+
 	ns, name, err := cache.SplitMetaNamespaceKey(key)
 	utilruntime.Must(err)
 
+	q.logger.Infof("%s: [WORKER-%d] processing key %q (queueDepth=%d)",
+		q.name, workerID, key, queueDepth)
+
 	requeue, err := process(key, name, ns)
+
+	elapsed := time.Since(start)
+
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("%s: Failed to process object with key %q using function %#v: %w", q.name, key, process, err))
 	}
+
+	q.logger.Infof("%s: [WORKER-%d] done key %q elapsed=%v requeue=%v err=%v",
+		q.name, workerID, key, elapsed, requeue, err != nil)
 
 	if requeue {
 		q.AddRateLimited(key)
