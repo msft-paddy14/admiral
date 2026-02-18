@@ -58,6 +58,7 @@ type queueType struct {
 	workqueue.TypedRateLimitingInterface[string]
 	priorityQueue *PriorityQueue
 	name          string
+	numWorkers    int
 	logger        log.Logger
 }
 
@@ -83,9 +84,15 @@ func NewWithConfig(name string, config Config) Interface {
 		})
 	}
 
+	numWorkers := config.NumWorkers
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
+	logf.Log.Info("%s: using %d worker(s)", name, numWorkers)	
 	q := &queueType{
 		logger:        log.Logger{Logger: logf.Log.WithName("WorkQueue")},
 		priorityQueue: priorityQueue,
+		numWorkers:    numWorkers,
 		TypedRateLimitingInterface: workqueue.NewTypedRateLimitingQueueWithConfig(
 			// caps the maximum wait
 			workqueue.NewTypedWithMaxWaitRateLimiter(
@@ -131,14 +138,15 @@ func (q *queueType) EnqueueWithOpts(obj any, opts EnqueueOpts) {
 	}
 }
 
-func (q *queueType) Run(process ProcessFunc ) {
+func (q *queueType) Run(process ProcessFunc) {
+	q.logger.Infof("%s: starting %d worker(s)", q.name, q.numWorkers)
 
-
+	for i := 0; i < q.numWorkers; i++ {
 		go func() {
 			for q.processNextWorkItem(process) {
 			}
 		}()
-	
+	}
 }
 
 func (q *queueType) processNextWorkItem(process ProcessFunc) bool {

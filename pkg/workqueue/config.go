@@ -41,6 +41,7 @@ type Config struct {
 	BucketRateLimiterItemsPerSec int
 	BucketRateLimiterMaxBurst    int
 	MaxVerbosity                 int
+	NumWorkers				   int
 }
 
 func DefaultConfig() Config {
@@ -50,6 +51,7 @@ func DefaultConfig() Config {
 		OverallRateLimiterMaxDelay:   5 * time.Minute,
 		BucketRateLimiterItemsPerSec: 1000,
 		BucketRateLimiterMaxBurst:    2000,
+		NumWorkers: 200,
 	}
 }
 
