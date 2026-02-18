@@ -51,7 +51,7 @@ func DefaultConfig() Config {
 		OverallRateLimiterMaxDelay:   5 * time.Minute,
 		BucketRateLimiterItemsPerSec: 1000,
 		BucketRateLimiterMaxBurst:    2000,
-		NumWorkers: 200,
+		NumWorkers: 30,
 	}
 }
 

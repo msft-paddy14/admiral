@@ -20,6 +20,7 @@ package broker
 
 import (
 	"fmt"
+	"net/http"
 	"path/filepath"
 	"reflect"
 	"time"
@@ -159,6 +160,9 @@ type SyncerConfig struct {
 
 	// MaxLogVerbosity configures the maximum verbosity for debug logging. Default is 0 which disables debug logging.
 	MaxLogVerbosity int
+
+	// BrokerTransportWrapFunc if specified, wraps the broker REST config's HTTP transport (e.g. for httptrace).
+	BrokerTransportWrapFunc func(rt http.RoundTripper) http.RoundTripper
 }
 
 type Syncer struct {
@@ -352,8 +356,13 @@ func (c *SyncerConfig) createBrokerClient() error {
 	if err != nil {
 		logger.Error(err, "Error accessing the broker API server")
 	}
-	c.BrokerRestConfig.QPS = 1000
-	c.BrokerRestConfig.Burst = 2000
+	c.BrokerRestConfig.QPS = 5000
+	c.BrokerRestConfig.Burst = 7000
+
+	if c.BrokerTransportWrapFunc != nil {
+		c.BrokerRestConfig.Wrap(c.BrokerTransportWrapFunc)
+	}
+
 	c.BrokerClient, err = resource.NewDynamicClient(c.BrokerRestConfig)
 
 	return errors.Wrap(err, "error creating dynamic client")
