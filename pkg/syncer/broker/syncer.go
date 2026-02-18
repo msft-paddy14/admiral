@@ -352,7 +352,8 @@ func (c *SyncerConfig) createBrokerClient() error {
 	if err != nil {
 		logger.Error(err, "Error accessing the broker API server")
 	}
-
+	c.BrokerRestConfig.QPS = 1000
+	c.BrokerRestConfig.Burst = 2000
 	c.BrokerClient, err = resource.NewDynamicClient(c.BrokerRestConfig)
 
 	return errors.Wrap(err, "error creating dynamic client")
