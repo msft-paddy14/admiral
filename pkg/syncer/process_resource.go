@@ -34,6 +34,9 @@ import (
 func (r *resourceSyncer) processNextWorkItem(key, name, ns string) (bool, error) {
 	resourceOp := r.operationQueues.peek(key)
 
+	// Log when item is dequeued for processing
+	r.log.Infof("[PROCESS-START] Syncer %q processing key %q", r.config.Name, key)
+
 	if ns == namespaceKey {
 		switch resourceOp.(type) {
 		case deleteOperation:

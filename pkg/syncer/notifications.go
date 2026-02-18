@@ -40,6 +40,9 @@ func (r *resourceSyncer) onCreate(obj any, isInInitialList bool) {
 
 	key, _ := cache.MetaNamespaceKeyFunc(resource)
 
+	// Log when event is received from watch (before any processing)
+	r.log.Infof("[WATCH-EVENT] Syncer %q received CREATE for %q (isInitialList=%v)", r.config.Name, key, isInInitialList)
+
 	r.operationQueues.add(key, createOperation(resource))
 
 	// If this is from the initial listing on startup then enqueue with low priority to prioritize newly
