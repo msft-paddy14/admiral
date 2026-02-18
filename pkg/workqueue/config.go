@@ -48,8 +48,8 @@ func DefaultConfig() Config {
 		ItemRateLimiterBaseDelay:     time.Millisecond,
 		ItemRateLimiterMaxDelay:      30 * time.Second,
 		OverallRateLimiterMaxDelay:   5 * time.Minute,
-		BucketRateLimiterItemsPerSec: 10,
-		BucketRateLimiterMaxBurst:    500,
+		BucketRateLimiterItemsPerSec: 1000,
+		BucketRateLimiterMaxBurst:    2000,
 	}
 }
 
