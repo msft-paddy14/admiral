@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/pkg/errors"
+	"github.com/submariner-io/admiral/pkg/federate"
 	"github.com/submariner-io/admiral/pkg/log"
 	resourceUtil "github.com/submariner-io/admiral/pkg/resource"
 	"github.com/submariner-io/admiral/pkg/util"
@@ -126,7 +127,12 @@ func (r *resourceSyncer) handleCreatedOrUpdated(key string, created *unstructure
 
 		tDistributeStart := time.Now()
 
-		err = r.config.Federator.Distribute(context.Background(), resource)
+		distributeCtx := context.Background()
+		if op == Create {
+			distributeCtx = federate.WithCreateContext(distributeCtx)
+		}
+
+		err = r.config.Federator.Distribute(distributeCtx, resource)
 
 		tDistributeDone := time.Since(tDistributeStart)
 

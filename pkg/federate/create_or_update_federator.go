@@ -26,6 +26,7 @@ import (
 	"github.com/submariner-io/admiral/pkg/log"
 	"github.com/submariner-io/admiral/pkg/resource"
 	"github.com/submariner-io/admiral/pkg/util"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -71,6 +72,28 @@ func (f *createOrUpdateFederator) Distribute(ctx context.Context, obj runtime.Ob
 	}
 
 	f.prepareResourceForSync(toDistribute)
+
+	// Optimistic create: if the syncer knows this is a new resource, try Create first
+	// to skip the expensive List-by-label existence check.
+	if IsCreateContext(ctx) {
+		created, createErr := resourceClient.Create(ctx, toDistribute, metav1.CreateOptions{})
+		if createErr == nil {
+			if f.eventLogName != "" {
+				f.logger.Infof("%s: Created %s \"%s/%s\" ", f.eventLogName, created.GetKind(), created.GetNamespace(),
+					created.GetName())
+			}
+
+			return nil
+		}
+
+		if !apierrors.IsAlreadyExists(createErr) {
+			return createErr
+		}
+
+		// AlreadyExists: fall through to full CreateOrUpdate for the update path
+		f.logger.V(log.DEBUG).Infof("Optimistic create failed (AlreadyExists), falling back to CreateOrUpdate for %s/%s",
+			toDistribute.GetNamespace(), toDistribute.GetName())
+	}
 
 	result, newObj, err := util.CreateOrUpdateWithOptions[*unstructured.Unstructured](ctx,
 		util.CreateOrUpdateOptions[*unstructured.Unstructured]{
