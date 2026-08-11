@@ -99,6 +99,9 @@ type TransformFunc func(from runtime.Object, numRequeues int, op Operation) (run
 // OnSuccessfulSyncFunc is invoked after a successful sync operation.
 type OnSuccessfulSyncFunc func(synced runtime.Object, op Operation) bool
 
+// OnEnqueueFunc is invoked immediately before a resource is added to the work queue.
+type OnEnqueueFunc func(resource runtime.Object, op Operation)
+
 type ResourceEquivalenceFunc func(obj1, obj2 *unstructured.Unstructured) bool
 
 type ShouldProcessFunc func(obj *unstructured.Unstructured, op Operation) bool
@@ -145,6 +148,9 @@ type ResourceSyncerConfig struct {
 	// OnSuccessfulSync function invoked after a successful sync operation. If true is returned, the resource is re-queued
 	// to be retried later.
 	OnSuccessfulSync OnSuccessfulSyncFunc
+
+	// OnEnqueue function invoked immediately before a resource is added to the work queue.
+	OnEnqueue OnEnqueueFunc
 
 	// ResourcesEquivalent function to compare two resources for equivalence. This is invoked on an update notification
 	// to compare the old and new resources. If true is returned, the update is ignored, otherwise the update is processed.

@@ -62,6 +62,9 @@ type ResourceConfig struct {
 	// OnSuccessfulSyncToBroker function invoked after a successful sync operation to the broker.
 	OnSuccessfulSyncToBroker syncer.OnSuccessfulSyncFunc
 
+	// OnLocalEnqueue function invoked immediately before a local resource is queued for broker synchronization.
+	OnLocalEnqueue syncer.OnEnqueueFunc
+
 	// LocalResourcesEquivalent function to compare two local resources for equivalence. See ResourceSyncerConfig.ResourcesEquivalent
 	// for more details.
 	LocalResourcesEquivalent syncer.ResourceEquivalenceFunc
@@ -90,6 +93,9 @@ type ResourceConfig struct {
 
 	// OnSuccessfulSyncFromBroker function invoked after a successful sync operation from the broker.
 	OnSuccessfulSyncFromBroker syncer.OnSuccessfulSyncFunc
+
+	// OnBrokerEnqueue function invoked immediately before a broker resource is queued for local synchronization.
+	OnBrokerEnqueue syncer.OnEnqueueFunc
 
 	// BrokerResourcesEquivalent function to compare two broker resources for equivalence. See ResourceSyncerConfig.ResourcesEquivalent
 	// for more details.
@@ -249,6 +255,7 @@ func NewSyncer(config SyncerConfig) (*Syncer, error) { //nolint:gocritic // Mini
 			ResourceType:        rc.LocalResourceType,
 			Transform:           rc.TransformLocalToBroker,
 			OnSuccessfulSync:    rc.OnSuccessfulSyncToBroker,
+			OnEnqueue:           rc.OnLocalEnqueue,
 			ResourcesEquivalent: rc.LocalResourcesEquivalent,
 			ShouldProcess:       rc.LocalShouldProcess,
 			WaitForCacheSync:    rc.LocalWaitForCacheSync,
@@ -289,6 +296,7 @@ func NewSyncer(config SyncerConfig) (*Syncer, error) { //nolint:gocritic // Mini
 			ResourceType:        rc.BrokerResourceType,
 			Transform:           rc.TransformBrokerToLocal,
 			OnSuccessfulSync:    rc.OnSuccessfulSyncFromBroker,
+			OnEnqueue:           rc.OnBrokerEnqueue,
 			ResourcesEquivalent: rc.BrokerResourcesEquivalent,
 			ShouldProcess:       rc.BrokerShouldProcess,
 			WaitForCacheSync:    &waitForCacheSync,

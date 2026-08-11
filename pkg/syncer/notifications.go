@@ -41,6 +41,7 @@ func (r *resourceSyncer) onCreate(obj any, isInInitialList bool) {
 	key, _ := cache.MetaNamespaceKeyFunc(resource)
 
 	r.operationQueues.add(key, createOperation(resource))
+	r.onEnqueue(resource, Create)
 
 	// If this is from the initial listing on startup then enqueue with low priority to prioritize newly
 	// created or updated resources. Also don't enqueue with rate limiting since we already know this is
@@ -67,6 +68,8 @@ func (r *resourceSyncer) onUpdate(oldObj, newObj any) {
 		return
 	}
 
+	r.onEnqueue(newResource, Update)
+
 	// If the resource version didn't change, that indicates a re-sync by the informer so enqueue at low priority.
 	// We want to prioritize processing resources that did actually change.
 	if oldResource.GetResourceVersion() == newResource.GetResourceVersion() {
@@ -92,7 +95,14 @@ func (r *resourceSyncer) onDelete(obj any) {
 	key, _ := cache.DeletionHandlingMetaNamespaceKeyFunc(obj)
 
 	r.operationQueues.add(key, deleteOperation(resource))
+	r.onEnqueue(resource, Delete)
 	r.workQueue.Enqueue(obj)
+}
+
+func (r *resourceSyncer) onEnqueue(resource runtime.Object, op Operation) {
+	if r.config.OnEnqueue != nil {
+		r.config.OnEnqueue(r.mustConvert(resource), op)
+	}
 }
 
 func (r *resourceSyncer) onSuccessfulSync(resource, converted runtime.Object, op Operation) bool {
